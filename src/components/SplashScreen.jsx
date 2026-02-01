@@ -1,9 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { GraduationCap, BookOpen } from "lucide-react";
-import logoImage from "figma:asset/e43b99fbf3daf7ef0b4379bee2be48bce749b881.png";
+import logoImage from "../assets/e43b99fbf3daf7ef0b4379bee2be48bce749b881.png";
 
-export function SplashScreen({ onSelectRole }) {
+export default function SplashScreen({ onSelectRole }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#374151] to-[#dc2626] flex flex-col items-center justify-center p-4">
       <div className="absolute top-8 left-8">
