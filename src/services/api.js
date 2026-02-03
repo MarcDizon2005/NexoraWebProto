@@ -1,88 +1,91 @@
 // ================================================================================
-// API SERVICE - Central HTTP Client Configuration
+// API CLIENT - HTTP Request Configuration
 // ================================================================================
-// This file creates and configures an axios instance for all API calls
-// Handles authentication tokens, base URLs, and common error handling
+// Central axios instance with token management and automatic refresh
 
 import axios from 'axios';
 
 // ================================================================================
-// BASE CONFIGURATION
+// CONFIGURATION
 // ================================================================================
 
 /**
- * Base URL for API
- * - Development: http://localhost:3000/api
- * - Production: Should be set via environment variable
+ * API Base URL
  *
- * WHY: Centralized URL means we only change it in one place
+ * DEVELOPMENT: http://localhost:3000/api
+ * PRODUCTION: Set via VITE_API_URL environment variable
+ *
+ * USAGE:
+ * Create .env file:
+ * VITE_API_URL=https://your-production-api.com/api
  */
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 /**
- * Create axios instance with default config
+ * Create axios instance with base configuration
  *
- * WHAT THIS DOES:
- * - baseURL: All requests will prepend this URL
- * - withCredentials: Sends cookies with requests (needed for refresh token)
+ * SETTINGS:
+ * - baseURL: All requests prepend this URL
+ * - withCredentials: Send cookies (for refresh token)
+ * - timeout: Request timeout in milliseconds
  * - headers: Default headers for all requests
  */
 const api = axios.create({
-    baseURL: API_BASE_URL,           // Base URL for all requests
-    withCredentials: true,            // Send cookies (refresh token) automatically
+    baseURL: API_BASE_URL,
+    withCredentials: true,  // CRITICAL: Sends httpOnly cookie with requests
+    timeout: 30000,         // 30 second timeout
     headers: {
-        'Content-Type': 'application/json'  // Default to JSON
+        'Content-Type': 'application/json'
     }
 });
 
 // ================================================================================
-// TOKEN MANAGEMENT
+// TOKEN STORAGE
 // ================================================================================
 
 /**
- * Store access token in memory (NOT localStorage for security)
+ * Access Token Storage
+ *
+ * SECURITY: Stored in memory (NOT localStorage)
  *
  * WHY IN MEMORY:
  * - Prevents XSS attacks from stealing token
- * - Automatically cleared when user closes tab
- * - Refresh token in httpOnly cookie provides persistence
+ * - Auto-cleared when tab/window closes
+ * - Refresh token (in httpOnly cookie) provides session persistence
+ *
+ * TRADE-OFF:
+ * - Token lost on page refresh
+ * - But automatically restored via refreshToken call on app load
  */
 let accessToken = null;
 
 /**
- * Set access token for API requests
- * Called after login or token refresh
+ * Set access token
+ * Called after successful login or token refresh
  *
- * @param {String} token - JWT access token from backend
- *
- * USAGE:
- * setAccessToken(loginResponse.data.accessToken)
+ * @param {string} token - JWT access token from backend
  */
 export const setAccessToken = (token) => {
     accessToken = token;
-    // Token will be added to requests via interceptor below
+    console.log('[AUTH] Access token set in memory');
 };
 
 /**
  * Get current access token
  *
- * @returns {String|null} Current token or null if not logged in
- *
- * USAGE:
- * const token = getAccessToken()
- * if (!token) redirect to login
+ * @returns {string|null} Current token or null
  */
-export const getAccessToken = () => accessToken;
+export const getAccessToken = () => {
+    return accessToken;
+};
 
 /**
- * Clear access token (on logout)
- *
- * USAGE:
- * clearAccessToken()
- * // User is now logged out
+ * Clear access token
+ * Called on logout or when token refresh fails
  */
 export const clearAccessToken = () => {
     accessToken = null;
+    console.log('[AUTH] Access token cleared from memory');
 };
 
 // ================================================================================
@@ -90,27 +93,32 @@ export const clearAccessToken = () => {
 // ================================================================================
 
 /**
- * Intercept every request BEFORE it's sent
- * Add authentication token to Authorization header
+ * Add authentication token to every request
  *
  * HOW IT WORKS:
- * 1. User makes API call: api.get('/protected')
- * 2. This interceptor runs BEFORE request is sent
+ * 1. User calls: api.get('/auth/me')
+ * 2. This interceptor runs BEFORE request sent
  * 3. Adds "Authorization: Bearer <token>" header
  * 4. Request continues to backend
+ * 5. Backend verifies token and responds
  */
 api.interceptors.request.use(
     (config) => {
-        // If we have an access token, add it to request
+        // Add access token to request if available
         if (accessToken) {
-            // Add Authorization header with Bearer token
-            // Backend expects: "Bearer eyJhbGciOiJIUzI1NiIs..."
             config.headers.Authorization = `Bearer ${accessToken}`;
         }
-        return config;  // Continue with modified request
+
+        // Log request for debugging (remove in production)
+        if (import.meta.env.DEV) {
+            console.log(`[API] ${config.method.toUpperCase()} ${config.url}`);
+        }
+
+        return config;
     },
     (error) => {
-        // Request setup failed somehow
+        // Request setup failed
+        console.error('[API] Request error:', error);
         return Promise.reject(error);
     }
 );
@@ -120,97 +128,129 @@ api.interceptors.request.use(
 // ================================================================================
 
 /**
- * Intercept every response AFTER backend responds
- * Handle token expiration and automatic refresh
+ * Handle responses and automatic token refresh
  *
- * HOW IT WORKS:
- * 1. Request is made to protected endpoint
- * 2. Backend responds with 401 (token expired)
- * 3. This interceptor catches the 401
- * 4. Automatically calls /auth/refresh to get new token
- * 5. Retries original request with new token
- * 6. User doesn't even notice token was refreshed!
+ * HOW TOKEN REFRESH WORKS:
+ * 1. Request to protected endpoint
+ * 2. Access token expired (15 minutes passed)
+ * 3. Backend returns 401 Unauthorized
+ * 4. This interceptor catches 401
+ * 5. Calls /auth/refresh with refresh token cookie
+ * 6. Gets new access token (15 min validity)
+ * 7. Retries original request with new token
+ * 8. User doesn't notice - seamless!
+ *
+ * REFRESH TOKEN EXPIRY:
+ * - If refresh token also expired (7 days)
+ * - Refresh call fails with 401
+ * - User redirected to login
  */
+
+// Flag to prevent multiple refresh attempts
+let isRefreshing = false;
+
+// Queue of failed requests waiting for token refresh
+let failedQueue = [];
+
+/**
+ * Process queued requests after token refresh
+ *
+ * @param {Error|null} error - Error if refresh failed
+ * @param {string|null} token - New access token if refresh succeeded
+ */
+const processQueue = (error, token = null) => {
+    failedQueue.forEach(prom => {
+        if (error) {
+            prom.reject(error);
+        } else {
+            prom.resolve(token);
+        }
+    });
+
+    failedQueue = [];
+};
+
 api.interceptors.response.use(
     (response) => {
-        // Response is successful (2xx status)
-        // Just return it as-is
+        // Successful response (2xx status)
         return response;
     },
     async (error) => {
-        // Response is an error (4xx or 5xx status)
+        const originalRequest = error.config;
 
-        const originalRequest = error.config;  // Store original request
-
-        /**
-         * HANDLE TOKEN EXPIRATION (401 Unauthorized)
-         *
-         * WHEN THIS HAPPENS:
-         * - Access token expired (after 15 minutes)
-         * - Backend returns 401
-         * - We need to refresh token
-         */
+        // Handle token expiration (401 Unauthorized)
         if (error.response?.status === 401 && !originalRequest._retry) {
-            // _retry flag prevents infinite loop
-            // Without it: refresh fails → retry refresh → retry refresh → ...
+
+            // Prevent retry loop
+            if (isRefreshing) {
+                // Token refresh already in progress
+                // Queue this request to retry after refresh completes
+                return new Promise((resolve, reject) => {
+                    failedQueue.push({ resolve, reject });
+                })
+                    .then(token => {
+                        originalRequest.headers.Authorization = `Bearer ${token}`;
+                        return api(originalRequest);
+                    })
+                    .catch(err => {
+                        return Promise.reject(err);
+                    });
+            }
+
+            // Mark request as retried to prevent infinite loop
             originalRequest._retry = true;
+            isRefreshing = true;
 
             try {
-                /**
-                 * STEP 1: REQUEST NEW ACCESS TOKEN
-                 *
-                 * POST /auth/refresh
-                 * - Automatically sends refresh token cookie (withCredentials: true)
-                 * - Backend verifies refresh token
-                 * - Returns new access token
-                 */
+                console.log('[AUTH] Access token expired, refreshing...');
+
+                // Call refresh endpoint
+                // Backend uses refresh token from httpOnly cookie
                 const refreshResponse = await axios.post(
                     `${API_BASE_URL}/auth/refresh`,
-                    {},  // Empty body
-                    { withCredentials: true }  // Send refresh token cookie
+                    {},
+                    { withCredentials: true }
                 );
 
-                /**
-                 * STEP 2: SAVE NEW TOKEN
-                 *
-                 * Backend response: { success: true, data: { accessToken: "..." } }
-                 * Extract token and save it
-                 */
+                // Extract new access token
                 const newAccessToken = refreshResponse.data.data.accessToken;
+
+                // Save new token
                 setAccessToken(newAccessToken);
 
-                /**
-                 * STEP 3: RETRY ORIGINAL REQUEST
-                 *
-                 * Update Authorization header with new token
-                 * Retry the request that failed
-                 */
+                console.log('[AUTH] Token refreshed successfully');
+
+                // Process queued requests
+                processQueue(null, newAccessToken);
+
+                // Retry original request with new token
                 originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-                return api(originalRequest);  // Retry with new token
+                return api(originalRequest);
 
             } catch (refreshError) {
-                /**
-                 * REFRESH FAILED
-                 *
-                 * CAUSES:
-                 * - Refresh token expired (after 7 days)
-                 * - Refresh token invalid
-                 * - User logged out
-                 *
-                 * ACTION:
-                 * - Clear tokens
-                 * - Redirect to login
-                 */
+                console.error('[AUTH] Token refresh failed:', refreshError);
+
+                // Refresh failed - user must login again
+                processQueue(refreshError, null);
                 clearAccessToken();
 
-                // Redirect to login page
-                window.location.href = '/';  // Adjust to your login route
-
                 return Promise.reject(refreshError);
+
+            } finally {
+                isRefreshing = false;
             }
         }
 
-        // Other errors (not 401) - just return them
+        // Other errors (not 401) - return them as-is
+        // Log error for debugging
+        if (import.meta.env.DEV) {
+            console.error('[API] Response error:', {
+                url: error.config?.url,
+                status: error.response?.status,
+                message: error.response?.data?.message
+            });
+        }
+
         return Promise.reject(error);
     }
 );
@@ -219,44 +259,5 @@ api.interceptors.response.use(
 // EXPORT API INSTANCE
 // ================================================================================
 
-/**
- * Export configured axios instance
- *
- * USAGE IN OTHER FILES:
- *
- * import api from './services/api'
- *
- * // GET request
- * const users = await api.get('/admin/users')
- *
- * // POST request
- * const newUser = await api.post('/admin/users', { email, password })
- *
- * // Protected request (token added automatically)
- * const profile = await api.get('/auth/me')
- */
 export default api;
 
-// ================================================================================
-// EXAMPLE USAGE
-// ================================================================================
-
-/**
- * COMPLETE AUTHENTICATION FLOW:
- *
- * // 1. User logs in
- * const response = await api.post('/auth/login', { email, password })
- * setAccessToken(response.data.data.accessToken)
- *
- * // 2. Access protected resource
- * const profile = await api.get('/auth/me')
- * // Token automatically added via interceptor
- *
- * // 3. Token expires after 15 minutes
- * const data = await api.get('/some/protected/route')
- * // Gets 401 → Automatically refreshes → Retries → Success!
- *
- * // 4. User logs out
- * await api.post('/auth/logout')
- * clearAccessToken()
- */

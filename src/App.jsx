@@ -1,74 +1,451 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { Suspense, lazy } from 'react'
-import { AuthProvider } from './hooks/useAuth'
-
-import DashboardLayout from './layouts/DashboardLayout'
-
-const LoginPage = lazy(() => import('./pages/auth/LoginPage'))
-const SignUpPage = lazy(() => import('./pages/auth/SignUpPage'))
-const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage'))
-const EmailVerificationPage = lazy(() => import('./pages/auth/EmailVerificationPage'))
-const StudentDashboard = lazy(() => import('./pages/dashboard/StudentDashboard'))
-const TeacherDashboard = lazy(() => import('./pages/dashboard/TeacherDashboard'))
-const AdminDashboard = lazy(() => import('./pages/dashboard/AdminDashboard'))
-const ProfilePage = lazy(() => import('./pages/ProfilePage'))
-const MessagesPage = lazy(() => import('./pages/MessagesPage'))
-const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
-const SplashScreen = lazy(() => import('./components/SplashScreen'))
-
-const PageLoader = () => (
-    <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
-    </div>
-)
-
-function SplashWrapper() {
-    const navigate = useNavigate()
-
-    const handleSelectRole = (role, action) => {
-        if (action === "login") {
-            navigate("/login", { state: { role } })
-        } else {
-            navigate("/signup", { state: { role } })
-        }
-    }
-
-    return <SplashScreen onSelectRole={handleSelectRole} />
-}
-
-function AppRoutes() {
-    return (
-        <Suspense fallback={<PageLoader />}>
-            <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/signup" element={<SignUpPage />} />
-                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                <Route path="/verify-email" element={<EmailVerificationPage />} />
-                <Route path="/splash" element={<SplashWrapper />} />
-
-                <Route element={<DashboardLayout />}>
-                    <Route path="/student" element={<StudentDashboard />} />
-                    <Route path="/teacher" element={<TeacherDashboard />} />
-                    <Route path="/admin" element={<AdminDashboard />} />
-                    <Route path="/profile" element={<ProfilePage />} />
-                    <Route path="/messages" element={<MessagesPage />} />
-                    <Route path="/notifications" element={<NotificationsPage />} />
-                </Route>
-
-                <Route path="/" element={<Navigate to="/splash" replace />} />
-            </Routes>
-        </Suspense>
-    )
-}
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import SplashScreen from './components/SplashScreen';
+import { LoginPage } from './pages/auth/LoginPage';
+import { SignUpPage } from './pages/auth/SignUpPage';
+import { EmailVerificationPage } from './pages/auth/EmailVerificationPage';
+import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
+import  DashboardLayout  from './layouts/DashboardLayout';
+import  StudentDashboard  from './pages/dashboard/StudentDashboard';
+import CoursesPage from './pages/student/CoursesPage';
+import  TeacherDashboard  from './pages/dashboard/TeacherDashboard';
+import ClassesPage from './pages/teacher/ClassesPage';
+import  AdminDashboard  from './pages/dashboard/AdminDashboard';
+import UserManagementPage from './pages/admin/UserManagementPage';
+import SubjectManagementPage from './pages/admin/SubjectManagementPage';
+import SectionManagementPage from './pages/admin/SectionManagementPage';
+import  ProfilePage  from './pages/ProfilePage';
+import  NotificationsPage  from './pages/NotificationsPage';
+import MessagesPage  from './pages/MessagesPage';
+import { Toaster } from './components/ui/sonner';
 
 function App() {
+
+    // ================================================================================
+    // AUTH STATE - From Context
+    // ================================================================================
+
+    /**
+     * Get auth state and functions from contexts
+     *
+     * REPLACES:
+     * - const [user, setUser] = useState(null)
+     * - Mock user data
+     * - handleLogin / handleLogout
+     *
+     * NOW:
+     * - user comes from backend
+     * - login/logout call real APIs
+     * - State persists across refreshes
+     */
+    const { user, logout } = useAuth();
+
+    // ================================================================================
+    // NAVIGATION STATE - Unchanged
+    // ================================================================================
+
+    /**
+     * Current page/route
+     * Still using simple state-based routing
+     * Could be replaced with React Router later
+     */
+    const [currentPage, setCurrentPage] = useState('splash');
+
+    /**
+     * Selected role for login/signup
+     * Determines which form to show
+     */
+    const [selectedRole, setSelectedRole] = useState('student');
+
+    /**
+     * Temporary data for verification flow
+     * Stores email during signup → verification process
+     */
+    const [tempEmail, setTempEmail] = useState('');
+
+    // ================================================================================
+    // AUTO-REDIRECT AUTHENTICATED USERS
+    // ================================================================================
+
+    /**
+     * If user is logged in, auto-redirect to dashboard
+     *
+     * WHY:
+     * - Logged-in users shouldn't see splash/login pages
+     * - Better UX - go straight to their dashboard
+     */
+    useEffect(() => {
+        if (user && (currentPage === 'splash' || currentPage === 'login' || currentPage === 'signup')) {
+            setCurrentPage('dashboard');
+        }
+    }, [user, currentPage]);
+
+    // ================================================================================
+    // NAVIGATION HANDLERS
+    // ================================================================================
+
+    /**
+     * Handle role selection from splash screen
+     *
+     * @param {String} role - Selected role (student/teacher/admin)
+     * @param {String} action - Action (login/signup)
+     *
+     * UNCHANGED from original
+     */
+    const handleRoleSelection = (role, action) => {
+        setSelectedRole(role);
+        setCurrentPage(action);
+    };
+
+    /**
+     * Handle successful signup
+     * Redirect to email verification
+     *
+     * @param {Object} data - Registration response data
+     *
+     * CHANGED:
+     * - No longer creates user immediately
+     * - Stores email for verification
+     * - Redirects to verification page
+     */
+    const handleSignUp = (data) => {
+        // Store email for verification page
+        setTempEmail(data.email || data.data?.user?.email);
+
+        // Redirect to verification
+        setCurrentPage('emailVerification');
+    };
+
+    /**
+     * Handle successful email verification
+     * Redirect to login
+     *
+     * CHANGED:
+     * - No longer manually creates user
+     * - Backend already activated account
+     * - Just redirect to login
+     */
+    const handleEmailVerification = () => {
+        // Clear temp email
+        setTempEmail('');
+
+        // Redirect to login
+        setCurrentPage('login');
+    };
+
+    /**
+     * Handle successful password reset
+     * Redirect to login
+     *
+     * UNCHANGED from original
+     */
+    const handlePasswordReset = () => {
+        setCurrentPage('login');
+    };
+
+    /**
+     * Handle logout
+     *
+     * CHANGED:
+     * - Calls real logout API
+     * - Clears tokens
+     * - Redirects to splash
+     */
+    const handleLogout = async () => {
+        await logout();  // Calls API + clears state
+        setCurrentPage('splash');
+    };
+
+    /**
+     * Handle profile click
+     *
+     * UNCHANGED from original
+     */
+    const handleProfileClick = () => {
+        setCurrentPage('profile');
+    };
+
+    /**
+     * Handle profile save
+     *
+     * CHANGED:
+     * - Updates user in contexts
+     * - In real app, would call backend API to persist
+     * - For now, just updates local state
+     *
+     * TODO: Add API call to update user profile
+     * await api.patch('/users/profile', profileData)
+     */
+
+    /**
+     * Handle general navigation
+     *
+     * UNCHANGED from original
+     */
+    const handleNavigation = (page) => {
+        setCurrentPage(page);
+    };
+
+    // ================================================================================
+    // RENDER DASHBOARD CONTENT
+    // ================================================================================
+
+    /**
+     * Render appropriate dashboard based on user role
+     *
+     * CHANGED:
+     * - Uses real user.roles array from backend
+     * - Checks roles[0] instead of role string
+     */
+    const renderDashboardContent = () => {
+        if (!user) return null;
+
+        if (currentPage === 'dashboard') {
+            // Get user's primary role
+            // Backend returns roles as array: ["student"] or ["teacher"]
+            const primaryRole = user.roles?.[0];
+
+            switch (primaryRole) {
+                case 'student':
+                    return <StudentDashboard />;
+                case 'teacher':
+                    return <TeacherDashboard />;
+                case 'admin':
+                    return <AdminDashboard />;
+                default:
+                    return <StudentDashboard />;
+            }
+        }
+
+        if (currentPage === 'classes') {
+            return <ClassesPage />;
+        }
+
+        if (currentPage === 'courses') {
+            return <CoursesPage />;
+        }
+
+        if (currentPage === 'notifications') {
+            return <NotificationsPage />;
+        }
+
+        if (currentPage === 'messages') {
+            return <MessagesPage />;
+        }
+
+        if (currentPage === 'users') {
+            return <UserManagementPage />;
+        }
+
+        if (currentPage === 'subjects') {
+            return <SubjectManagementPage />;
+        }
+
+        if (currentPage === 'sections') {
+            return <SectionManagementPage />;
+        }
+
+        // Placeholder for other pages (courses, settings, etc.)
+        return (
+            <div className="p-6">
+                <div className="max-w-4xl mx-auto">
+                    <h1 className="mb-4 capitalize">{currentPage.replace('-', ' ')}</h1>
+                    <div className="bg-white rounded-lg border p-8 text-center">
+                        <p className="text-muted-foreground">
+                            This page is under development. Content for "{currentPage}" will be added here.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    // ================================================================================
+    // MAIN RENDER - Page Routing
+    // ================================================================================
+
+    /**
+     * Render current page based on state
+     *
+     * CHANGES:
+     * - Removed onLogin/onSignUp props (handled by contexts)
+     * - Added handleSignUp callback
+     * - Updated user role checking
+     */
+    const renderPage = () => {
+        switch (currentPage) {
+
+            // ============================
+            // PUBLIC PAGES (No Auth Required)
+            // ============================
+
+            case 'splash':
+                return <SplashScreen onSelectRole={handleRoleSelection} />;
+
+            case 'login':
+                return (
+                    <LoginPage
+                        role={selectedRole}
+                        onBack={() => setCurrentPage('splash')}
+                        onForgotPassword={() => setCurrentPage('forgotPassword')}
+                        onSignUp={() => setCurrentPage('signup')}
+                        // onLogin removed - handled by LoginPage via useAuth()
+                    />
+                );
+
+            case 'signup':
+                return (
+                    <SignUpPage
+                        role={selectedRole}
+                        onBack={() => setCurrentPage('splash')}
+                        onLogin={() => setCurrentPage('login')}
+                        // Add callback to handle signup success
+                        onSignupSuccess={handleSignUp}
+                    />
+                );
+
+            case 'emailVerification':
+                return (
+                    <EmailVerificationPage
+                        email={tempEmail}
+                        onBack={() => setCurrentPage('signup')}
+                        onVerify={handleEmailVerification}
+                    />
+                );
+
+            case 'forgotPassword':
+                return (
+                    <ForgotPasswordPage
+                        onBack={() => setCurrentPage('login')}
+                        onReset={handlePasswordReset}
+                    />
+                );
+
+            // ============================
+            // PROTECTED PAGES (Auth Required)
+            // ============================
+
+            case 'profile':
+                // Check if user is logged in
+                if (!user) {
+                    setCurrentPage('splash');
+                    return null;
+                }
+
+                return (
+                    <DashboardLayout
+                        role={user.roles?.[0] || 'student'}  // Get role from user object
+                        userName={`${user.firstName || ''} ${user.lastName || user.email}`}
+                        currentPage="profile"
+                        onNavigate={handleNavigation}
+                        onProfile={handleProfileClick}
+                        onNotifications={() => setCurrentPage('notifications')}
+                        onMessages={() => setCurrentPage('messages')}
+                    >
+                        <ProfilePage />
+                    </DashboardLayout>
+                );
+
+            case 'notifications':
+            case 'messages':
+            case 'dashboard':
+            default:
+                // Check if user is logged in
+                if (!user) {
+                    setCurrentPage('splash');
+                    return null;
+                }
+
+                return (
+                    <DashboardLayout
+                        role={user.roles?.[0] || 'student'}
+                        userName={`${user.firstName || ''} ${user.lastName || user.email}`}
+                        currentPage={currentPage}
+                        onNavigate={handleNavigation}
+                        onProfile={handleProfileClick}
+                        onNotifications={() => setCurrentPage('notifications')}
+                        onMessages={() => setCurrentPage('messages')}
+                    >
+                        {renderDashboardContent()}
+                    </DashboardLayout>
+                );
+        }
+    };
+
+    // ================================================================================
+    // RENDER APP
+    // ================================================================================
+
     return (
-        <BrowserRouter>
-            <AuthProvider>
-                <AppRoutes />
-            </AuthProvider>
-        </BrowserRouter>
-    )
+        <>
+            {renderPage()}
+            <Toaster position="top-right" richColors />
+        </>
+    );
 }
 
-export default App
+export default App;
+
+// ================================================================================
+// SUMMARY OF CHANGES
+// ================================================================================
+
+/**
+ * MAJOR CHANGES:
+ *
+ * 1. REMOVED MOCK USER STATE
+ *    - Before: const [user, setUser] = useState(null)
+ *    - After: const { user } = useAuth()
+ *    - User state now comes from backend via AuthContext
+ *
+ * 2. REMOVED MOCK LOGIN HANDLER
+ *    - Before: handleLogin() set mock user
+ *    - After: LoginPage calls useAuth().login() directly
+ *    - Real API call to backend
+ *
+ * 3. UPDATED SIGNUP FLOW
+ *    - Before: Created user immediately
+ *    - After: Redirects to email verification
+ *    - User must verify before activation
+ *
+ * 4. UPDATED USER ROLE CHECKING
+ *    - Before: user.role (string)
+ *    - After: user.roles[0] (array)
+ *    - Matches backend response format
+ *
+ * 5. ADDED AUTO-REDIRECT
+ *    - Logged-in users auto-redirected to dashboard
+ *    - Better UX
+ *
+ * 6. PROTECTED ROUTE CHECKS
+ *    - Dashboard pages check if user logged in
+ *    - Redirect to splash if not authenticated
+ *
+ * WHAT STAYED THE SAME:
+ * ✓ All UI components
+ * ✓ Navigation state management
+ * ✓ Page routing logic
+ * ✓ Component props
+ * ✓ Layout structure
+ *
+ * AUTHENTICATION FLOW NOW:
+ * 1. User on splash screen
+ * 2. Clicks Student Login
+ * 3. Enters credentials on LoginPage
+ * 4. LoginPage calls useAuth().login()
+ * 5. API call to POST /auth/login
+ * 6. Backend verifies and returns tokens
+ * 7. AuthContext saves user state
+ * 8. App.jsx sees user is logged in
+ * 9. Auto-redirects to dashboard
+ * 10. Dashboard shows based on user.roles[0]
+ *
+ * TODO - PROFILE UPDATE API:
+ * Currently profile updates only save to local state
+ * Need to add API call:
+ *
+ * const handleProfileSave = async (data) => {
+ *   await api.patch('/users/profile', data)
+ *   updateUser(data)
+ * }
+ */

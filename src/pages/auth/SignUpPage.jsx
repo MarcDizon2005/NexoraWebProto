@@ -5,11 +5,11 @@
 // ALL UI/DESIGN PRESERVED - Only logic and fields changed
 
 import { useState } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 
 /**
@@ -33,14 +33,14 @@ import { ArrowLeft, Eye, EyeOff } from "lucide-react";
  * - Proper error handling
  * - Redirects to email verification on success
  */
-export function SignUpPage({ role, onBack, onLogin }) {
+export function SignUpPage({ role, onBack, onLogin, onSignupSuccess }) {
 
   // ================================================================================
   // HOOKS & STATE
   // ================================================================================
 
   /**
-   * Get register function from context
+   * Get register function from contexts
    */
   const { register } = useAuth();
 
@@ -259,16 +259,19 @@ export function SignUpPage({ role, onBack, onLogin }) {
       await register({
         email: formData.email,
         password: formData.password,
+        confirmPassword: formData.confirmPassword,
         role: role  // From props (student/teacher)
       });
 
       // Registration successful!
-      // Save email for verification page
-      setRegisteredEmail(formData.email);
-
-      // Show email verification message
-      // In a real app, you might navigate to a separate verification page
-      setShowEmailVerification(true);
+      // Call parent success handler to move to verification page
+      if (onSignupSuccess) {
+        onSignupSuccess({ email: formData.email });
+      } else {
+        // Fallback internal state
+        setRegisteredEmail(formData.email);
+        setShowEmailVerification(true);
+      }
 
     } catch (error) {
       /**
@@ -280,12 +283,30 @@ export function SignUpPage({ role, onBack, onLogin }) {
        * 3. Network error
        */
 
-      // Email already exists
-      if (error.message?.includes('already registered')) {
+      // Email already exists (checked via code or message)
+      if (error.code === 'EMAIL_EXISTS' || error.message?.toLowerCase().includes('already registered') || error.message?.toLowerCase().includes('already taken')) {
         setErrors(prev => ({
           ...prev,
           email: 'Email already registered. Please log in instead.'
         }));
+      }
+      // Validation errors from backend (e.g., password too weak)
+      else if (error.errors) {
+        // Map backend errors to form fields
+        const newErrors = { ...errors };
+        
+        Object.values(error.errors).forEach(err => {
+          const field = err.field;
+          const msg = err.message || err.msg;
+          
+          if (field && newErrors.hasOwnProperty(field)) {
+            newErrors[field] = msg;
+          } else if (field === 'email') { // Fallback if field name slightly different
+            newErrors.email = msg;
+          }
+        });
+        
+        setErrors(newErrors);
       }
       // Generic error
       else {
@@ -502,49 +523,3 @@ export function SignUpPage({ role, onBack, onLogin }) {
       </div>
   );
 }
-
-// ================================================================================
-// SUMMARY OF CHANGES
-// ================================================================================
-
-/**
- * WHAT STAYED THE SAME:
- * ✓ All UI components and styling
- * ✓ Card layout and structure
- * ✓ Password visibility toggles
- * ✓ Error display
- *
- * WHAT CHANGED:
- * ✓ Removed name fields (firstName, middleName, lastName)
- *   - Backend doesn't require them for registration
- *   - Will be added in profile completion after verification
- *
- * ✓ Simplified form to match backend schema:
- *   - email (required)
- *   - password (required)
- *   - role (from props)
- *
- * ✓ Added real API integration:
- *   - Calls POST /auth/register
- *   - Handles backend validation errors
- *   - Shows loading states
- *
- * ✓ Added email verification flow:
- *   - After registration, shows verification message
- *   - User must check email for OTP
- *   - Links to login page
- *
- * HOW IT NOW WORKS:
- * 1. User fills email and password
- * 2. Frontend validates format and strength
- * 3. User clicks Sign Up
- * 4. Calls POST /auth/register
- * 5. Backend creates account with PENDING status
- * 6. Backend sends OTP email
- * 7. Shows verification success message
- * 8. User goes to email
- * 9. User enters OTP on verification page
- * 10. Account activated
- * 11. User can login
- * 12. After first login, prompted to complete profile with name
- */

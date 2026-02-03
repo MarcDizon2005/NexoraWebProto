@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react'
-import { useAuth } from '@/hooks/useAuth'
-import { userService } from '@/services/userService'
+import React, { useState, useEffect } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { toast } from 'sonner'
 
 const ProfilePage = () => {
-  const { user } = useAuth()
+  const { user, updateProfile } = useAuth()
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -17,7 +17,7 @@ const ProfilePage = () => {
   useEffect(() => {
     if (user) {
       setFormData({
-        name: user.name || '',
+        name: user.fullName || user.email?.split('@')[0] || '',
         email: user.email || '',
       })
     }
@@ -31,9 +31,11 @@ const ProfilePage = () => {
     e.preventDefault()
     setIsLoading(true)
     try {
-      await userService.updateProfile(formData)
+      await updateProfile(formData)
+      toast.success('Profile updated successfully')
     } catch (err) {
       console.error(err)
+      toast.error(err.message || 'Failed to update profile')
     } finally {
       setIsLoading(false)
     }
@@ -47,7 +49,7 @@ const ProfilePage = () => {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
+              <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
                 <Input
                     id="name"
@@ -57,7 +59,7 @@ const ProfilePage = () => {
                 />
               </div>
 
-              <div>
+              <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                     id="email"
@@ -67,11 +69,17 @@ const ProfilePage = () => {
                     onChange={handleChange}
                     disabled
                 />
+                <p className="text-xs text-muted-foreground">Email cannot be changed.</p>
               </div>
 
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? 'Saving...' : 'Save Changes'}
-              </Button>
+              <div className="pt-4 flex gap-4">
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? 'Saving...' : 'Save Changes'}
+                </Button>
+                <div className="text-sm self-center text-muted-foreground">
+                  Role: <span className="font-semibold capitalize">{user?.roles?.[0]}</span>
+                </div>
+              </div>
             </form>
           </CardContent>
         </Card>

@@ -1,43 +1,89 @@
-import { Link, useLocation } from 'react-router-dom'
-import { cn } from '@/components/ui/utils'
+import React from 'react';
+import { cn } from '@/components/ui/utils';
+import { 
+  LayoutDashboard, 
+  User, 
+  MessageSquare, 
+  Bell, 
+  LogOut,
+  BookOpen,
+  Users,
+  Settings
+} from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
-const Sidebar = () => {
-  const location = useLocation()
+const Sidebar = ({ role, currentPage, onNavigate }) => {
+  const { logout } = useAuth();
 
-  const navItems = [
-    { path: '/student', label: 'Dashboard', icon: '📊' },
-    { path: '/profile', label: 'Profile', icon: '👤' },
-    { path: '/messages', label: 'Messages', icon: '💬' },
-    { path: '/notifications', label: 'Notifications', icon: '🔔' },
-  ]
+  const getNavItems = () => {
+    const commonItems = [
+      { id: 'profile', label: 'Profile', icon: <User className="h-5 w-5" /> },
+      { id: 'messages', label: 'Messages', icon: <MessageSquare className="h-5 w-5" /> },
+      { id: 'notifications', label: 'Notifications', icon: <Bell className="h-5 w-5" /> },
+    ];
+
+    const roleSpecificItems = {
+      student: [
+        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
+        { id: 'courses', label: 'My Courses', icon: <BookOpen className="h-5 w-5" /> },
+      ],
+      teacher: [
+        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
+        { id: 'classes', label: 'My Classes', icon: <Users className="h-5 w-5" /> },
+      ],
+      admin: [
+        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
+        { id: 'users', label: 'Manage Users', icon: <Users className="h-5 w-5" /> },
+        { id: 'subjects', label: 'Manage Subjects', icon: <BookOpen className="h-5 w-5" /> },
+        { id: 'sections', label: 'Manage Sections', icon: <Users className="h-5 w-5" /> },
+        { id: 'settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
+      ]
+    };
+
+    return [...(roleSpecificItems[role] || roleSpecificItems.student), ...commonItems];
+  };
+
+  const navItems = getNavItems();
 
   return (
-      <aside className="w-64 bg-white shadow-md">
-        <div className="p-4 border-b">
-          <h1 className="text-xl font-bold">Nexora</h1>
-        </div>
-        <nav className="p-4">
-          <ul className="space-y-2">
-            {navItems.map((item) => (
-                <li key={item.path}>
-                  <Link
-                      to={item.path}
-                      className={cn(
-                          'flex items-center gap-3 px-4 py-2 rounded-lg transition-colors',
-                          location.pathname === item.path
-                              ? 'bg-primary text-white'
-                              : 'hover:bg-gray-100'
-                      )}
-                  >
-                    <span>{item.icon}</span>
-                    <span>{item.label}</span>
-                  </Link>
-                </li>
-            ))}
-          </ul>
-        </nav>
-      </aside>
-  )
-}
+    <aside className="w-64 bg-white border-r flex flex-col h-full shrink-0">
+      <div className="p-6 border-b">
+        <h1 className="text-2xl font-bold text-primary">Nexora</h1>
+        <p className="text-xs text-muted-foreground mt-1 capitalize">{role} Portal</p>
+      </div>
+      
+      <nav className="flex-1 p-4 overflow-y-auto">
+        <ul className="space-y-1">
+          {navItems.map((item) => (
+            <li key={item.id}>
+              <button
+                onClick={() => onNavigate(item.id)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-2 rounded-md transition-colors text-sm font-medium',
+                  currentPage === item.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
-export default Sidebar
+      <div className="p-4 border-t">
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-3 px-4 py-2 rounded-md transition-colors text-sm font-medium text-destructive hover:bg-destructive/10"
+        >
+          <LogOut className="h-5 w-5" />
+          Logout
+        </button>
+      </div>
+    </aside>
+  );
+};
+
+export default Sidebar;

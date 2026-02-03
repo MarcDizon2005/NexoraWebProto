@@ -5,11 +5,11 @@
 // ALL UI/DESIGN PRESERVED - Only logic changed
 
 import { useState } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 
 /**
@@ -34,7 +34,7 @@ export function LoginPage({ role, onBack, onForgotPassword, onSignUp }) {
   // ================================================================================
 
   /**
-   * Get auth functions from context
+   * Get auth functions from contexts
    * Replaces: onLogin prop with real API call
    */
   const { login } = useAuth();

@@ -1,40 +1,36 @@
 // ================================================================================
-// AUTH SERVICE - Authentication API Calls
+// AUTH SERVICE - Backend-Compatible Authentication
 // ================================================================================
-// Handles all authentication-related API requests
-// Uses the configured api instance from api.js
+// This service handles all authentication operations
+// Matches the backend API structure exactly
 
-import api, { setAccessToken, clearAccessToken, getAccessToken } from './api';
+import api, { setAccessToken, clearAccessToken } from './api';
 
 // ================================================================================
-// AUTHENTICATION FUNCTIONS
+// REGISTRATION - Matches Backend Schema
 // ================================================================================
 
 /**
- * REGISTER NEW USER
- * POST /auth/register
+ * Register a new user account
  *
- * @param {Object} userData - Registration data
- * @param {String} userData.email - User's email
- * @param {String} userData.password - User's password
- * @param {String} userData.role - User role (student/teacher)
- * @returns {Promise} Response with user data
+ * BACKEND ENDPOINT: POST /api/auth/register
  *
  * BACKEND EXPECTS:
  * {
- *   email: "student@school.edu",
- *   password: "SecurePass123!",
- *   role: "student"  // Optional, defaults to "student"
+ *   email: string (required) - User's email address
+ *   password: string (required) - Must meet security requirements
+ *   confirmPassword: string (required) - Must match password
+ *   role: string (optional) - Defaults to "student" if not provided
  * }
  *
  * BACKEND RETURNS:
  * {
  *   success: true,
- *   message: "Registration successful. Please check your email...",
+ *   message: "Registration successful. Please check your email for verification code.",
  *   data: {
  *     user: {
  *       id: "uuid",
- *       email: "student@school.edu",
+ *       email: "user@example.com",
  *       roles: ["student"],
  *       isEmailVerified: false,
  *       status: "PENDING"
@@ -42,47 +38,65 @@ import api, { setAccessToken, clearAccessToken, getAccessToken } from './api';
  *   }
  * }
  *
- * FLOW:
- * 1. User fills registration form
- * 2. Frontend calls this function
- * 3. Backend creates account with PENDING status
- * 4. Backend sends OTP email
- * 5. Frontend redirects to email verification page
+ * WHAT HAPPENS:
+ * 1. Backend validates email format and password strength
+ * 2. Backend checks if email already exists
+ * 3. Backend creates user with PENDING status
+ * 4. Backend generates 6-digit OTP code
+ * 5. Backend sends verification email
+ * 6. Frontend should redirect to email verification page
  */
-export const register = async (userData) => {
+export const register = async ({ email, password, confirmPassword, role = 'student' }) => {
     try {
-        // Make POST request to /auth/register
-        // api.post automatically adds base URL
-        // Full URL: http://localhost:3000/api/auth/register
+        // Make API call to registration endpoint
         const response = await api.post('/auth/register', {
-            email: userData.email,        // User's email
-            password: userData.password,  // Plain text password (backend will hash it)
-            role: userData.role || 'student'  // Default to student if not provided
+            email,           // User's email address
+            password,        // User's password (will be hashed by backend)
+            confirmPassword, // Password confirmation
+            role            // User role (student/teacher)
         });
 
-        // Return the response data
-        // response.data = { success: true, message: "...", data: { user: {...} } }
+        // Return the full response data
+        // This includes the user object and success message
         return response.data;
 
     } catch (error) {
-        // API call failed
-        // error.response.data = { success: false, message: "Email already registered" }
-        throw error.response?.data || { message: 'Registration failed' };
+        // Handle different error types from backend
+
+        if (error.response) {
+            // Backend returned an error response
+            const { data, status } = error.response;
+
+            // Throw structured error with backend message
+            throw {
+                message: data.message || 'Registration failed',
+                code: data.code,
+                status: status,
+                errors: data.errors // Validation errors if any
+            };
+        }
+
+        // Network or other error
+        throw {
+            message: 'Network error. Please check your connection.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// EMAIL VERIFICATION - OTP Code Verification
+// ================================================================================
+
 /**
- * VERIFY EMAIL WITH OTP
- * POST /otp/verify
+ * Verify user's email with OTP code
  *
- * @param {String} email - User's email
- * @param {String} code - 6-digit OTP code
- * @returns {Promise} Verification result
+ * BACKEND ENDPOINT: POST /api/otp/verify
  *
  * BACKEND EXPECTS:
  * {
- *   email: "student@school.edu",
- *   code: "123456"
+ *   email: string (required) - User's email
+ *   code: string (required) - 6-digit OTP code from email
  * }
  *
  * BACKEND RETURNS:
@@ -90,51 +104,80 @@ export const register = async (userData) => {
  *   success: true,
  *   message: "Email verified successfully",
  *   data: {
- *     email: "student@school.edu",
+ *     email: "user@example.com",
  *     isVerified: true
  *   }
  * }
  *
  * WHAT HAPPENS:
- * - Backend verifies code matches
- * - Sets user.isEmailVerified = true
- * - Sets user.status = 'ACTIVE'
- * - User can now login
+ * 1. Backend finds OTP record for user
+ * 2. Backend checks if code matches
+ * 3. Backend checks if code is expired (<10 minutes)
+ * 4. Backend checks attempt count (<5 attempts)
+ * 5. Backend updates user: isEmailVerified = true, status = ACTIVE
+ * 6. Backend deletes used OTP
+ * 7. User can now login
  */
 export const verifyEmail = async (email, code) => {
     try {
         const response = await api.post('/otp/verify', {
-            email,  // User's email
-            code    // 6-digit code from email
+            email,  // User's email address
+            code    // 6-digit verification code
         });
 
         return response.data;
 
     } catch (error) {
-        // Common errors:
-        // - "Invalid verification code"
-        // - "Verification code has expired"
-        // - "Too many attempts"
-        throw error.response?.data || { message: 'Verification failed' };
+        if (error.response) {
+            const { data } = error.response;
+
+            // Handle specific verification errors
+            throw {
+                message: data.message || 'Verification failed',
+                code: data.code,
+                // These codes help UI show specific messages:
+                // OTP_INVALID - Wrong code entered
+                // OTP_EXPIRED - Code is older than 10 minutes
+                // OTP_MAX_ATTEMPTS - User tried 5+ times
+                // OTP_NOT_FOUND - No pending verification for this user
+            };
+        }
+
+        throw {
+            message: 'Network error. Please try again.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// RESEND OTP - Request New Verification Code
+// ================================================================================
+
 /**
- * RESEND OTP CODE
- * POST /otp/resend
+ * Resend OTP verification code
  *
- * @param {String} email - User's email
- * @returns {Promise} Result with new expiration time
+ * BACKEND ENDPOINT: POST /api/otp/resend
  *
- * USE CASE:
- * - User didn't receive code
- * - Code expired
- * - User entered wrong email
+ * BACKEND EXPECTS:
+ * {
+ *   email: string (required) - User's email
+ * }
  *
- * BACKEND:
- * - Deletes old OTP
- * - Generates new OTP
- * - Sends new email
+ * BACKEND RETURNS:
+ * {
+ *   success: true,
+ *   message: "Verification code sent",
+ *   data: {
+ *     expiresAt: "2026-02-01T12:30:00Z" // When new code expires
+ *   }
+ * }
+ *
+ * WHAT HAPPENS:
+ * 1. Backend deletes old OTP records for this user
+ * 2. Backend generates new 6-digit code
+ * 3. Backend sends new email
+ * 4. Backend returns new expiration time
  */
 export const resendOTP = async (email) => {
     try {
@@ -142,22 +185,34 @@ export const resendOTP = async (email) => {
         return response.data;
 
     } catch (error) {
-        throw error.response?.data || { message: 'Failed to resend code' };
+        if (error.response) {
+            const { data } = error.response;
+            throw {
+                message: data.message || 'Failed to resend code',
+                code: data.code
+            };
+        }
+
+        throw {
+            message: 'Network error. Please try again.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// LOGIN - User Authentication
+// ================================================================================
+
 /**
- * LOGIN USER
- * POST /auth/login
+ * Login user with email and password
  *
- * @param {String} email - User's email
- * @param {String} password - User's password
- * @returns {Promise} Response with user data and tokens
+ * BACKEND ENDPOINT: POST /api/auth/login
  *
  * BACKEND EXPECTS:
  * {
- *   email: "student@school.edu",
- *   password: "SecurePass123!"
+ *   email: string (required) - User's email
+ *   password: string (required) - User's password
  * }
  *
  * BACKEND RETURNS:
@@ -167,67 +222,93 @@ export const resendOTP = async (email) => {
  *   data: {
  *     user: {
  *       id: "uuid",
- *       email: "student@school.edu",
+ *       email: "user@example.com",
  *       roles: ["student"],
  *       isEmailVerified: true
  *     },
- *     accessToken: "eyJhbGciOiJIUzI1NiIs..."
+ *     accessToken: "eyJhbGciOiJIUzI1NiIs..." // JWT token
  *   }
  * }
  *
  * ALSO SETS:
- * - Cookie: refreshToken (httpOnly, secure)
+ * - HttpOnly cookie: refreshToken (7 day expiration)
  *
- * FLOW:
- * 1. User enters credentials
- * 2. Backend verifies email is verified
- * 3. Backend checks password hash
- * 4. Backend generates access token (15 min) and refresh token (7 days)
- * 5. Access token returned in JSON
- * 6. Refresh token set as httpOnly cookie
- * 7. Frontend saves access token in memory
+ * WHAT HAPPENS:
+ * 1. Backend finds user by email
+ * 2. Backend checks if email is verified
+ * 3. Backend checks if account is active
+ * 4. Backend verifies password hash
+ * 5. Backend generates access token (15 min) and refresh token (7 days)
+ * 6. Backend returns access token in response
+ * 7. Backend sets refresh token as httpOnly cookie
+ * 8. Frontend saves access token in memory
+ * 9. Backend updates lastLoginAt timestamp
  */
 export const login = async (email, password) => {
     try {
         const response = await api.post('/auth/login', {
-            email,
-            password
+            email,      // User's email
+            password    // User's password (backend will verify hash)
         });
 
-        // Extract access token from response
+        // Extract access token and user data from response
         const { accessToken, user } = response.data.data;
 
-        // Save access token to memory
-        // This will be added to all subsequent requests
+        // Save access token to memory (NOT localStorage for security)
+        // This token will be added to all future API requests automatically
         setAccessToken(accessToken);
 
-        // Return user data
+        // Return user data for context/state management
         return response.data;
 
     } catch (error) {
-        // Common errors:
-        // - "Invalid email or password"
-        // - "Email not verified" → Redirect to verification
-        // - "Account is suspended"
-        throw error.response?.data || { message: 'Login failed' };
+        if (error.response) {
+            const { data, status } = error.response;
+
+            // Handle specific login errors
+            throw {
+                message: data.message || 'Login failed',
+                code: data.code,
+                status: status,
+                // Common error codes:
+                // EMAIL_NOT_VERIFIED - User hasn't verified email yet
+                // INVALID_CREDENTIALS - Wrong email or password
+                // ACCOUNT_INACTIVE - Account suspended/deleted
+            };
+        }
+
+        throw {
+            message: 'Network error. Please try again.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// LOGOUT - Clear User Session
+// ================================================================================
+
 /**
- * LOGOUT USER
- * POST /auth/logout
+ * Logout user and clear tokens
  *
- * @returns {Promise} Logout result
+ * BACKEND ENDPOINT: POST /api/auth/logout
  *
- * WHAT IT DOES:
- * 1. Clears refresh token cookie (backend)
- * 2. Clears access token from memory (frontend)
- * 3. Redirects to login page
+ * BACKEND EXPECTS: Nothing (uses refresh token from cookie)
+ *
+ * BACKEND RETURNS:
+ * {
+ *   success: true,
+ *   message: "Logout successful"
+ * }
+ *
+ * WHAT HAPPENS:
+ * 1. Backend clears refreshToken cookie
+ * 2. Frontend clears access token from memory
+ * 3. User is logged out
  */
 export const logout = async () => {
     try {
         // Call backend logout endpoint
-        // This clears the refresh token cookie
         await api.post('/auth/logout');
 
         // Clear access token from memory
@@ -236,25 +317,24 @@ export const logout = async () => {
         return { success: true };
 
     } catch (error) {
-        // Even if backend call fails, still clear local token
+        // Even if backend call fails, clear local token
         clearAccessToken();
-        throw error.response?.data || { message: 'Logout failed' };
+
+        // Don't throw error on logout - always succeed locally
+        return { success: true };
     }
 };
 
+// ================================================================================
+// GET CURRENT USER - Fetch Authenticated User Data
+// ================================================================================
+
 /**
- * GET CURRENT USER
- * GET /auth/me
+ * Get currently authenticated user's data
  *
- * @returns {Promise} Current user data
+ * BACKEND ENDPOINT: GET /api/auth/me
  *
- * USE CASE:
- * - Check if user is still logged in
- * - Get fresh user data
- * - Verify token is still valid
- *
- * REQUIRES:
- * - Valid access token in memory
+ * BACKEND EXPECTS: Valid access token in Authorization header
  *
  * BACKEND RETURNS:
  * {
@@ -262,39 +342,75 @@ export const logout = async () => {
  *   data: {
  *     user: {
  *       userId: "uuid",
- *       email: "student@school.edu",
+ *       email: "user@example.com",
  *       roles: ["student"]
  *     }
  *   }
  * }
+ *
+ * WHAT HAPPENS:
+ * 1. Frontend sends request with access token
+ * 2. Backend verifies token signature
+ * 3. Backend extracts user ID from token
+ * 4. Backend returns user data
+ *
+ * USED FOR:
+ * - Checking if user is still logged in on page load
+ * - Getting fresh user data after token refresh
+ * - Verifying authentication status
  */
 export const getCurrentUser = async () => {
     try {
-        // Check if we have a token first
-        if (!getAccessToken()) {
-            throw new Error('Not authenticated');
-        }
-
         const response = await api.get('/auth/me');
         return response.data;
 
     } catch (error) {
-        // Token expired or invalid
+        // If this fails, user is not authenticated
         clearAccessToken();
-        throw error.response?.data || { message: 'Failed to get user' };
+
+        if (error.response) {
+            const { data } = error.response;
+            throw {
+                message: data.message || 'Authentication failed',
+                code: data.code
+            };
+        }
+
+        throw {
+            message: 'Network error. Please try again.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// FORGOT PASSWORD - Request Password Reset
+// ================================================================================
+
 /**
- * FORGOT PASSWORD
- * POST /auth/forgot-password
+ * Request password reset OTP
  *
- * @param {String} email - User's email
- * @returns {Promise} Result
+ * BACKEND ENDPOINT: POST /api/auth/forgot-password
  *
- * WHAT IT DOES:
- * - Sends OTP to email for password reset
- * - Returns same message even if email doesn't exist (security)
+ * BACKEND EXPECTS:
+ * {
+ *   email: string (required) - User's email
+ * }
+ *
+ * BACKEND RETURNS:
+ * {
+ *   success: true,
+ *   message: "If an account exists, a code has been sent."
+ * }
+ *
+ * NOTE: Backend returns same message whether email exists or not
+ * This prevents email enumeration attacks
+ *
+ * WHAT HAPPENS:
+ * 1. Backend finds user by email (or not)
+ * 2. If user exists: generate OTP, send email
+ * 3. If user doesn't exist: do nothing but still return success
+ * 4. This prevents attackers from knowing which emails are registered
  */
 export const forgotPassword = async (email) => {
     try {
@@ -302,114 +418,177 @@ export const forgotPassword = async (email) => {
         return response.data;
 
     } catch (error) {
-        throw error.response?.data || { message: 'Failed to send reset code' };
+        if (error.response) {
+            const { data } = error.response;
+            throw {
+                message: data.message || 'Failed to send reset code',
+                code: data.code
+            };
+        }
+
+        throw {
+            message: 'Network error. Please try again.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// RESET PASSWORD - Complete Password Reset
+// ================================================================================
+
 /**
- * RESET PASSWORD
- * POST /auth/reset-password
+ * Reset password with OTP code
  *
- * @param {String} email - User's email
- * @param {String} code - OTP code from email
- * @param {String} newPassword - New password
- * @returns {Promise} Result
+ * BACKEND ENDPOINT: POST /api/auth/reset-password
  *
  * BACKEND EXPECTS:
  * {
- *   email: "student@school.edu",
- *   code: "123456",
- *   newPassword: "NewSecurePass123!"
+ *   email: string (required) - User's email
+ *   code: string (required) - 6-digit OTP from email
+ *   newPassword: string (required) - New password (must meet requirements)
  * }
  *
- * FLOW:
- * 1. User clicks "Forgot Password"
- * 2. Enters email → forgotPassword() → Receives OTP
- * 3. Enters code + new password → resetPassword()
- * 4. Backend verifies OTP
+ * BACKEND RETURNS:
+ * {
+ *   success: true,
+ *   message: "Password reset successfully"
+ * }
+ *
+ * WHAT HAPPENS:
+ * 1. Backend finds user by email
+ * 2. Backend verifies OTP code
+ * 3. Backend checks if code expired
+ * 4. Backend validates new password strength
  * 5. Backend hashes new password
- * 6. Password updated
- * 7. User can login with new password
+ * 6. Backend updates user's password
+ * 7. Backend deletes used OTP
+ * 8. User can now login with new password
  */
 export const resetPassword = async (email, code, newPassword) => {
     try {
         const response = await api.post('/auth/reset-password', {
-            email,
-            code,
-            newPassword
+            email,        // User's email
+            code,         // 6-digit OTP code
+            newPassword   // New password (backend will hash it)
         });
 
         return response.data;
 
     } catch (error) {
-        throw error.response?.data || { message: 'Failed to reset password' };
+        if (error.response) {
+            const { data } = error.response;
+            throw {
+                message: data.message || 'Failed to reset password',
+                code: data.code,
+                errors: data.errors // Validation errors if password is weak
+            };
+        }
+
+        throw {
+            message: 'Network error. Please try again.',
+            code: 'NETWORK_ERROR'
+        };
     }
 };
 
+// ================================================================================
+// TOKEN REFRESH - Get New Access Token
+// ================================================================================
+
 /**
- * REFRESH ACCESS TOKEN
- * POST /auth/refresh
+ * Refresh access token using refresh token cookie
  *
- * @returns {Promise} New access token
+ * BACKEND ENDPOINT: POST /api/auth/refresh
+ *
+ * BACKEND EXPECTS: Valid refresh token in httpOnly cookie
+ *
+ * BACKEND RETURNS:
+ * {
+ *   success: true,
+ *   message: "Token refreshed successfully",
+ *   data: {
+ *     accessToken: "eyJhbGciOiJIUzI1NiIs..." // New JWT token
+ *   }
+ * }
+ *
+ * WHAT HAPPENS:
+ * 1. Frontend sends request (refresh token auto-sent via cookie)
+ * 2. Backend verifies refresh token
+ * 3. Backend checks if user still exists and is active
+ * 4. Backend generates new access token (15 min)
+ * 5. Backend returns new token
+ * 6. Frontend saves new token in memory
  *
  * NOTE: This is usually called automatically by the API interceptor
- * You rarely need to call this manually
- *
- * WHEN IT'S USED:
- * - Access token expires (after 15 min)
- * - API interceptor detects 401 response
- * - Automatically calls this function
- * - Gets new access token
- * - Retries original request
+ * when access token expires (401 response)
  */
 export const refreshToken = async () => {
     try {
-        // withCredentials: true automatically sends refresh token cookie
         const response = await api.post('/auth/refresh');
 
         const { accessToken } = response.data.data;
+
+        // Save new access token
         setAccessToken(accessToken);
 
         return response.data;
 
     } catch (error) {
-        // Refresh token expired or invalid
-        // User must login again
+        // Refresh token expired or invalid - user must login again
         clearAccessToken();
-        throw error.response?.data || { message: 'Session expired' };
+
+        if (error.response) {
+            const { data } = error.response;
+            throw {
+                message: data.message || 'Session expired',
+                code: data.code
+            };
+        }
+
+        throw {
+            message: 'Session expired. Please login again.',
+            code: 'SESSION_EXPIRED'
+        };
     }
 };
 
 // ================================================================================
-// AUTHENTICATION STATE HELPERS
+// HELPER FUNCTIONS
 // ================================================================================
 
 /**
  * Check if user is authenticated
  *
- * @returns {Boolean} True if user has valid token
+ * RETURNS: boolean - true if user has valid access token
  *
- * USAGE:
- * if (isAuthenticated()) {
- *   // Show dashboard
- * } else {
- *   // Redirect to login
- * }
+ * NOTE: This only checks if token EXISTS in memory
+ * It doesn't verify if token is valid or expired
+ * For that, call getCurrentUser()
  */
 export const isAuthenticated = () => {
+    // Import from api.js which stores the token
+    const { getAccessToken } = require('./api');
     return getAccessToken() !== null;
 };
 
 /**
- * Get token for manual use (rare)
+ * Update user profile
  *
- * @returns {String|null} Current access token
- *
- * NOTE: Usually you don't need this
- * The API interceptor adds token automatically
+ * BACKEND ENDPOINT: PATCH /api/auth/profile
  */
-export const getToken = () => {
-    return getAccessToken();
+export const updateProfile = async (profileData) => {
+    try {
+        const response = await api.patch('/auth/profile', {
+            fullName: profileData.name
+        });
+        return response.data;
+    } catch (error) {
+        if (error.response) {
+            throw error.response.data;
+        }
+        throw error;
+    }
 };
 
 // ================================================================================
@@ -417,15 +596,22 @@ export const getToken = () => {
 // ================================================================================
 
 export default {
+    // Registration & Verification
     register,
     verifyEmail,
     resendOTP,
+
+    // Authentication
     login,
     logout,
     getCurrentUser,
+    updateProfile,
+
+    // Password Management
     forgotPassword,
     resetPassword,
+
+    // Token Management
     refreshToken,
-    isAuthenticated,
-    getToken
+    isAuthenticated
 };

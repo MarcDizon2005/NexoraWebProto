@@ -5,49 +5,22 @@
 // ALL UI PRESERVED - Only logic updated
 
 import { useState, useEffect } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ArrowLeft } from "lucide-react";
 
-/**
- * EmailVerificationPage Component
- *
- * @param {String} email - User's email (from registration)
- * @param {Function} onBack - Navigate back to signup
- * @param {Function} onVerify - Called after successful verification (no longer used, handled by context)
- *
- * BACKEND API:
- * POST /otp/verify
- * Body: { email, code }
- *
- * BACKEND RETURNS:
- * {
- *   success: true,
- *   message: "Email verified successfully",
- *   data: {
- *     email: "student@school.edu",
- *     isVerified: true
- *   }
- * }
- *
- * CHANGES FROM ORIGINAL:
- * - Actually calls backend API
- * - Handles real OTP verification
- * - Can resend OTP
- * - Shows countdown timer
- * - Proper error handling
- */
-export function EmailVerificationPage({ email, onBack }) {
+
+export function EmailVerificationPage({ email, onBack, onVerify }) {
 
   // ================================================================================
   // HOOKS & STATE
   // ================================================================================
 
   /**
-   * Get auth functions from context
+   * Get auth functions from contexts
    */
   const { verifyEmail, resendOTP } = useAuth();
 
@@ -197,11 +170,14 @@ export function EmailVerificationPage({ email, onBack }) {
 
       // Success!
       setIsVerified(true);
-
-      // Auto-redirect to login after 3 seconds
-      setTimeout(() => {
-        window.location.href = '/';  // Or use navigation
-      }, 3000);
+      
+      // Call parent handler to navigate back to login
+      if (onVerify) {
+        // Wait a bit to show success message
+        setTimeout(() => {
+            onVerify();
+        }, 2000);
+      }
 
     } catch (error) {
       /**
@@ -431,61 +407,3 @@ export function EmailVerificationPage({ email, onBack }) {
   );
 }
 
-// ================================================================================
-// SUMMARY OF CHANGES
-// ================================================================================
-
-/**
- * WHAT STAYED THE SAME:
- * ✓ All UI components and styling
- * ✓ Card layout
- * ✓ Back button
- * ✓ Input styling
- *
- * WHAT CHANGED:
- * ✓ Added real API integration:
- *   - Calls POST /otp/verify
- *   - Calls POST /otp/resend
- *
- * ✓ Added validation:
- *   - 6 digits required
- *   - Only numbers allowed
- *   - Real-time validation
- *
- * ✓ Added user feedback:
- *   - Loading states
- *   - Error messages
- *   - Success message
- *   - Auto-redirect after success
- *
- * ✓ Added resend functionality:
- *   - Resend OTP button
- *   - 60 second cooldown
- *   - Countdown timer display
- *
- * ✓ Better UX:
- *   - Number keyboard on mobile
- *   - Auto-focus code input
- *   - Max length enforcement
- *   - Code expiration notice
- *
- * HOW IT NOW WORKS:
- * 1. User registers account
- * 2. Redirected to this page with their email
- * 3. User receives email with 6-digit code
- * 4. User enters code
- * 5. Frontend validates format
- * 6. Calls POST /otp/verify with email + code
- * 7. Backend verifies code matches
- * 8. Backend checks not expired (<10 min)
- * 9. Backend activates account
- * 10. Shows success message
- * 11. Auto-redirects to login (or manual click)
- * 12. User can now login with their credentials
- *
- * ERROR HANDLING:
- * - Invalid code: "Please try again"
- * - Expired code: "Request a new one"
- * - Too many attempts: "Request a new code"
- * - Can resend code with cooldown
- */
